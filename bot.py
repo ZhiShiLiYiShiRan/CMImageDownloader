@@ -15,7 +15,7 @@ import asyncio
 
 #------------------------environment variable ---------------------------
 load_dotenv()
-TOKEN = os.getenv("TOKEN")
+TOKEN = os.getenv("DISCORD_BOT_TOKEN")
 SERVER_ID = int(os.getenv("SERVER_ID"))
 SAVE_PATH = os.getenv("SAVE_PATH")
 MONGO_URI = os.getenv("MONGODB_URI")
