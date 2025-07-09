@@ -1,0 +1,28 @@
+<!-- templates/register.html -->
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <title>注册账号</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-100 min-h-screen flex items-center justify-center">
+  <div class="bg-white p-8 rounded shadow-md w-full max-w-md">
+    <h2 class="text-2xl font-bold mb-6 text-center">注册账号</h2>
+    <form method="POST" action="/register">
+      <label class="block mb-2 font-medium">用户名</label>
+      <input name="username" required class="w-full border border-gray-300 rounded px-3 py-2 mb-4">
+
+      <label class="block mb-2 font-medium">密码</label>
+      <input type="password" name="password" required class="w-full border border-gray-300 rounded px-3 py-2 mb-6">
+
+      <button type="submit" class="bg-blue-500 text-white w-full py-2 rounded hover:bg-blue-600">
+        注册
+      </button>
+    </form>
+    <p class="text-center text-sm text-gray-600 mt-4">
+      已有账号？<a href="/login" class="text-blue-500 hover:underline">点击登录</a>
+    </p>
+  </div>
+</body>
+</html>

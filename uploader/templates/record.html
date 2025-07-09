@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <title>录货页面</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-100 min-h-screen px-4 py-6">
+  <div class="max-w-2xl mx-auto bg-white shadow-md rounded-xl p-6">
+    <h2 class="text-2xl font-bold text-gray-800 mb-4">录货信息填写</h2>
+
+    <!-- 显示原始数据 -->
+    <div class="mb-6">
+      <p><span class="font-semibold text-gray-700">编号 (Label/Number):</span> {{ item.Label }}-{{ item.Number }}</p>
+      <p><span class="font-semibold text-gray-700">质检备注:</span> {{ item.Note }}</p>
+      <p><span class="font-semibold text-gray-700">图片数量:</span> {{ item.Image_count }}</p>
+      <p><span class="font-semibold text-gray-700">质检员:</span> {{ item.QA }} ({{ item.QA_time }})</p>
+    </div>
+
+    <!-- 图片预览 -->
+    <div class="grid grid-cols-3 gap-3 mb-6">
+      {% for url in item.Product_image %}
+        <div class="aspect-w-1 aspect-h-1">
+          <img src="{{ url }}" alt="product image" class="rounded-lg object-cover border border-gray-300">
+        </div>
+      {% endfor %}
+    </div>
+
+    <!-- 表单区域 -->
+    <form method="POST" action="/submit">
+      <input type="hidden" name="id" value="{{ item._id }}">
+
+      <label class="block mb-2 text-gray-800 font-medium">上架标题（Title）</label>
+      <input name="title" type="text" required class="w-full border border-gray-300 rounded-md p-2 mb-4 focus:ring-2 focus:ring-blue-400">
+
+      <label class="block mb-2 text-gray-800 font-medium">产品描述（Description）</label>
+      <textarea name="description" rows="3" required class="w-full border border-gray-300 rounded-md p-2 mb-4 focus:ring-2 focus:ring-blue-400"></textarea>
+
+      <label class="block mb-2 text-gray-800 font-medium">上架价格（Price）</label>
+      <input name="price" type="number" step="0.01" required class="w-full border border-gray-300 rounded-md p-2 mb-6 focus:ring-2 focus:ring-blue-400">
+
+      <!-- 提交和跳过按钮 -->
+      <div class="flex justify-between">
+        <button type="submit" class="bg-green-500 text-white px-4 py-2 rounded-md hover:bg-green-600">
+          保存
+        </button>
+        <a href="/skip" class="bg-gray-300 text-gray-800 px-4 py-2 rounded-md hover:bg-gray-400">
+          跳过
+        </a>
+      </div>
+    </form>
+  </div>
+</body>
+</html>

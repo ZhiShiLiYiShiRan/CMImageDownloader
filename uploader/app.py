@@ -2,6 +2,7 @@ from flask import Flask, request, render_template, jsonify, send_from_directory,
 from datetime import datetime
 from pathlib import Path
 from dotenv import load_dotenv
+from record import record_bp
 import logging
 import os
 import socket
@@ -9,6 +10,7 @@ import hashlib
 
 SECRET_KEY = os.getenv("UPLOAD_SECRET", "chillmart_secret")  # 默认值可修改
 app = Flask(__name__)
+app.register_blueprint(record_bp)
 
 load_dotenv()  # ← 读取 .env 文件
 # === 路径设置 ===
