@@ -1,6 +1,6 @@
 from pymongo import MongoClient
 
-client = MongoClient("mongodb+srv://rrriotacc:B0SdDj36GLxIkHuZ@lizard.fyju0pz.mongodb.net/")  # 可复制你.env 中的 URI
+client = MongoClient("")  # 可复制你.env 中的 URI
 db = client["chillmartTemp"]
 collection = db["qa_bot"]
 
