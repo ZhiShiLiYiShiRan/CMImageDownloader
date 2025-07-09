@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <title>质检图片上传</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <style>
+    body {
+      font-family: sans-serif;
+      padding: 20px;
+      max-width: 480px;
+      margin: auto;
+      background: #f9f9f9;
+    }
+    h2, h3 { color: #333; }
+    label {
+      display: block;
+      margin-top: 10px;
+      font-weight: bold;
+    }
+    input[type="text"], input[type="file"] {
+      width: 100%;
+      padding: 8px;
+      margin-top: 5px;
+      font-size: 16px;
+    }
+    .preview {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      justify-content: flex-start;
+      margin-top: 10px;
+    }
+    .preview div {
+      width: 30%;
+      position: relative;
+      aspect-ratio: 1 / 1;
+    }
+    .preview img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      border-radius: 6px;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.2);
+    }
+    .del-btn {
+      position: absolute;
+      top: -10px;
+      right: 2px;
+      background: rgba(0,0,0,0.6);
+      color: white;
+      border: none;
+      border-radius: 50%;
+      cursor: pointer;
+      width: 20px;
+      height: 20px;
+      font-size: 14px;
+      line-height: 18px;
+      text-align: center;
+      padding: 0;
+    }
+    .file-upload-label {
+    display: inline-block;
+    padding: 16px 24px;
+    background-color: #4CAF50;
+    color: white;
+    font-size: 20px;
+    border-radius: 10px;
+    cursor: pointer;
+    text-align: center;
+    margin-top: 10px;
+    transition: background-color 0.3s;
+    }
+    .file-upload-label:hover {
+    background-color: #45a049;
+    }
+    
+    #images {
+    display: none;
+    }
+    
+    button {
+      margin-top: 15px;
+      padding: 10px 20px;
+      font-size: 16px;
+      background-color: #007bff;
+      color: white;
+      border: none;
+      border-radius: 5px;
+      cursor: pointer;
+    }
+    button:disabled { background-color: #999; }
+    #status { margin-top: 15px; font-weight: bold; }
+  </style>
+</head>
+<body>
+  <h2>📸 QC image upload Form</h2>
+
+  <form id="uploadForm" method="post" enctype="multipart/form-data" onsubmit="handleUpload(event)">
+    <label for="number">Item Number (file name):</label>
+    <input type="text" name="number" id="number" required>
+
+    <label for="user">Inspector: </label>
+    <input type="text" name="user" id="user" readonly>
+
+    <button type="button" onclick="handleView()">👀 View existing images in folder </button>
+    <div class="preview" id="existing"></div>
+
+    <label for="images" class="file-upload-label">Choose Image(s): (Multiple selection supported)</label>
+    <input type="file" name="images" id="images" accept="image/*" multiple onchange="previewImages(this)">
+    <div class="preview" id="preview"></div>
+
+    <button type="submit" id="uploadBtn">🚀 Upload Image(s)</button>
+    <div id="status"></div>
+  </form>
+
+<script>
+  let selectedFiles = [];
+  let currentToken = "";
+  // 读取 URL 参数填入表单
+  window.onload = () => {
+    const url = new URL(window.location);
+    const number = url.searchParams.get("number") || "";
+    const user = url.searchParams.get("user") || "";
+    const token = url.searchParams.get("token") || "";
+    if (number) document.getElementById("number").value = number;
+    if (user) document.getElementById("user").value = user;
+    if (token) currentToken = token;  // ✅ 保存 token 用于后续上传请求
+  };
+
+  function previewImages(input) {
+    const newFiles = Array.from(input.files);
+    selectedFiles = selectedFiles.concat(newFiles);
+
+    const map = new Map();
+    selectedFiles.forEach(file => {
+      const key = file.name + "_" + file.size;
+      map.set(key, file);
+    });
+    selectedFiles = Array.from(map.values());
+    renderPreviews();
+    input.value = '';
+  }
+
+  function renderPreviews() {
+    const preview = document.getElementById('preview');
+    preview.innerHTML = '';
+    selectedFiles.forEach((file, index) => {
+      const container = document.createElement("div");
+      const img = document.createElement("img");
+      img.src = URL.createObjectURL(file);
+      const delBtn = document.createElement("button");
+      delBtn.innerText = "×";
+      delBtn.className = "del-btn";
+      delBtn.type = "button"; // ✅ 防止误触上传
+      delBtn.onclick = () => {
+        selectedFiles.splice(index, 1);
+        renderPreviews();
+      };
+      container.appendChild(img);
+      container.appendChild(delBtn);
+      preview.appendChild(container);
+    });
+  }
+
+  async function handleUpload(e) {
+    e.preventDefault();
+    // const status = document.getElementById('status');
+    const btn = document.getElementById('uploadBtn');
+    const number = document.getElementById('number').value;
+    const user = document.getElementById('user').value;
+
+    if (!number || selectedFiles.length === 0) {
+      alert('❗Please enter the item number and select image(s)');
+      return;
+    }
+
+    const formData = new FormData();
+    formData.append('number', number);
+    formData.append('user', user);
+    if (currentToken) {
+      formData.append('token', currentToken);  // ✅ 添加 token
+    }
+    selectedFiles.forEach(file => {
+      formData.append('images', file);
+    });
+
+    btn.disabled = true;
+    btn.innerText = 'loading...';
+    // status.innerText = '';
+
+    try {
+      const res = await fetch('/', { method: 'POST', body: formData });
+      const text = await res.text();
+      alert(text);  // ✅ 用弹窗显示上传结果
+      selectedFiles = [];
+      document.getElementById('images').value = '';
+      document.getElementById('preview').innerHTML = '';
+      await loadExistingImages(number);
+    } catch (err) {
+      alert('❌ Upload failed. Please try again.');
+    } finally {
+      btn.disabled = false;
+      btn.innerText = '🚀 Upload Image(s)';
+    }
+  }
+
+  async function handleView() {
+    const number = document.getElementById('number').value.trim();
+    if (!number) {
+      alert("Please enter the item number");
+      return;
+    }
+    await loadExistingImages(number);
+  }
+
+  async function loadExistingImages(number) {
+    const container = document.getElementById('existing');
+    container.innerHTML = '';
+    const res = await fetch(`/images?number=${number}`);
+    const files = await res.json();
+
+    files.forEach(filename => {
+      const wrapper = document.createElement("div");
+      const img = document.createElement("img");
+      img.src = `/${number}/${filename}?t=${Date.now()}`; // 防止缓存
+            const delBtn = document.createElement("button");
+      delBtn.innerText = "×";
+      delBtn.className = "del-btn";
+      delBtn.type = "button"; // ✅ 防止误触上传
+      delBtn.onclick = async () => {
+        const ok = confirm(`Are you sure you want to delete ${filename}?`);
+        if (!ok) return;
+
+        const user = document.getElementById('user').value;
+        const token = new URLSearchParams(window.location.search).get("token");
+
+        if (!token) {
+          alert("❌ Unable to delete image: Missing parameter. Please access the page using a valid link.");
+          return;
+        }
+
+        try {
+          const res = await fetch(`/delete-image?number=${number}&filename=${filename}&user=${encodeURIComponent(user)}&token=${token}`, {
+            method: 'POST'
+          });
+          const text = await res.text();
+          alert(text);  // ✅ 用弹窗提示删除结果
+          await loadExistingImages(number);
+        } catch (err) {
+          alert("❌ Failed to delete. Please check your internet or contact support.");
+        }
+      };
+      wrapper.appendChild(img);
+      wrapper.appendChild(delBtn);
+      container.appendChild(wrapper);
+    });
+  }
+</script>
+
+</body>
+</html>

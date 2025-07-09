@@ -1,191 +1,173 @@
+# === Discord QA Bot（读取 current_session.txt，记录日志）===
 import discord
 from discord import app_commands
 from discord.ext import commands
 from discord.ui import Modal, TextInput
 from dotenv import load_dotenv
-import aiohttp
+from pathlib import Path
 import os
-import re
-import io
 import logging
+import hashlib
 from datetime import datetime
 from motor.motor_asyncio import AsyncIOMotorClient
-# from pymongo import MongoClient
-import asyncio
 
-#------------------------environment variable ---------------------------
+# === 环境变量 ===
 load_dotenv()
 TOKEN = os.getenv("TOKEN")
 SERVER_ID = int(os.getenv("SERVER_ID"))
-SAVE_PATH = os.getenv("SAVE_PATH")
+UPLOAD_URL = os.getenv("UPLOAD_URL")
 MONGO_URI = os.getenv("MONGODB_URI")
 
-#---------------路径设置-----------------------
-LOG_PATH = os.path.join(SAVE_PATH, "log")
-os.makedirs(LOG_PATH, exist_ok=True)
+# === 路径设置 ===
+BASE_DIR = Path(__file__).resolve().parent
+CONFIG_FILE = Path(os.getenv("SESSION_CONFIG_PATH"))
+LOG_DIR = BASE_DIR / "uploader" / "logs"  # ✅ 指向 uploader/logs 目录
+DISCORD_LOG_FILE = LOG_DIR / "discord.log"
+LOG_DIR.mkdir(parents=True, exist_ok=True)  # ✅ 确保路径存在
 
-#---------------MongoDB-----------------------
+# === 设置独立 Discord 日志器 ===
+discord_logger = logging.getLogger("discord_log")
+discord_logger.setLevel(logging.INFO)
+
+if not discord_logger.hasHandlers():
+    file_handler = logging.FileHandler(DISCORD_LOG_FILE, encoding="utf-8")
+    formatter = logging.Formatter('[%(asctime)s] %(levelname)s: %(message)s')
+    file_handler.setFormatter(formatter)
+    discord_logger.addHandler(file_handler)
+
+# === MongoDB 初始化 ===
 mongo_client = AsyncIOMotorClient(MONGO_URI)
-db = mongo_client["chillmartTemp"]
-collection = db["qa_bot"]
+db = mongo_client["QCsys"]
+collection = db["qa_bot_test"]
+label_map = db["label_map"]
 
-#-------------log-----------------------------
-log_file = os.path.join(LOG_PATH, "qa_bot.log")
-logging.basicConfig(
-    filename=log_file,
-    level=logging.INFO,
-    format='[%(asctime)s] %(levelname)s: %(message)s',
-    encoding='utf-8'
-)
-
-#--------------discord bot ------------------------
+# === Bot 设置 ===
 intents = discord.Intents.default()
-intents.message_content = True
-intents.guilds = True
-intents.reactions = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 tree = bot.tree
 
-
-
-# 异步下载函数
-download_lock = asyncio.Lock()
-async def download_image(session, attachment, folder, index):
-    if attachment.content_type and "image" in attachment.content_type:
-        async with session.get(attachment.url) as resp:
-            if resp.status == 200:
-                image_bytes = await resp.read()
-                filename = f"{folder}-{index + 10}.jpg"
-                filepath = os.path.join(SAVE_PATH, folder, filename)
-                async with download_lock:
-                    with open(filepath, 'wb') as f:
-                        f.write(image_bytes)
-                return discord.File(io.BytesIO(image_bytes), filename=filename)
-    return None
+# === 工具函数：读取 current_session.txt ===
+def get_current_session_name():
+    if CONFIG_FILE.exists():
+        session = CONFIG_FILE.read_text(encoding="utf-8").strip()
+        print("读取到当前场次为：", session)
+        return session
+    else:
+        print("⚠️ 找不到 current_session.txt，路径是：", CONFIG_FILE)
+    return "未设置"
 
 
 
-# === Modal 表单定义 ===
-class QAForm(Modal, title="🧾 质检表单填写"):
-    bach_code = TextInput(label="label (E / F/ B)", placeholder="请输入 E/ F/ B", required=True)
-    number = TextInput(label="产品编号（如 286）", placeholder="输入产品编号", required=True)
-    optional = TextInput(label="产品链接（可选）", placeholder="https://example.com", required=False)
-    description = TextInput(label="产品描述（格式：SKU123/描述）", style=discord.TextStyle.paragraph, required=True)
-    location = TextInput(label="存放位置", placeholder="例如：？？？", required=False)
+# === 工具函数：生成上传链接 token ===
+def generate_token(number: str, user: str, secret="chillmart_secret"):
+    raw = f"{number}-{user}-{secret}"
+    return hashlib.sha256(raw.encode()).hexdigest()
+
+
+# === 表单定义 ===
+class QAForm(Modal, title="🧾 Inspector Submission Form"):
+    bach_code = TextInput(label="Label (e.g. E / F / B / AB)", required=True)
+    number = TextInput(label="Item Number (e.g. 286)", required=True)
+    optional = TextInput(label="Product Link (optional)", required=False)
+    note = TextInput(
+        label="QC Note, Scroll down for more(下滑显示更多)", 
+        style=discord.TextStyle.paragraph, 
+        required=True,
+        default=(
+            "SKU:\n"
+            "Parts Complete? Y / N\n"
+            "Condition:\n"
+            "No testing required or Tested:\n"
+            "QC Note:"
+            )
+        )
+    location = TextInput(label="Storage Location", required=False)
 
     async def on_submit(self, interaction: discord.Interaction):
         await interaction.response.defer(thinking=True)
-        logging.info(f"📝 用户 {interaction.user.display_name} 提交了质检表单")
-
-
-        # 检查图片
-        found_image_msg = None
-        async for msg in interaction.channel.history(limit=5):
-            if msg.author.id == interaction.user.id and any(
-                a.content_type and "image" in a.content_type for a in msg.attachments):
-                found_image_msg = msg
-                break
-
-        if not found_image_msg:
-            await interaction.followup.send("⚠️ 未检测到你最近上传的图片，请先发送图片再使用指令。", ephemeral=True)
-            return
-
-        # 检查重复编号
-        number_upper = self.number.value.upper()
-        if await collection.find_one({"number": number_upper}):
-            await interaction.followup.send(
-                f"⚠️ 编号 `{number_upper}` 已存在，请检查是否重复提交。或者呼叫 admin 处理。",
-                ephemeral=False
-            )
-            logging.warning(f"❌ 拒绝重复提交：{number_upper} by {interaction.user.display_name}")
-            return
-
-        # 校验 Bach Code
-        bach_code_clean = self.bach_code.value.strip().upper()
-        if bach_code_clean not in ["E", "F", "B"]:
-            await interaction.followup.send("❌ Label 只能是 E 或 F 或 B，请重新填写。", ephemeral=True)
-            return
-        # 映射 Bach ID
-        if bach_code_clean == "E":
-            bach_id = "1950-BUNJ-2507002"
-        elif bach_code_clean == "F":
-            bach_id = "1120-BRNJ-2507001"
-        else:  # bach_code_clean == "B"
-            bach_id = "2505-1STIN50"
-
-        # 获取链接与描述
-        url_val = self.optional.value.strip() if self.optional.value.strip() else "（未填写）"
-        product_desc = self.description.value.strip()
-        
-        # 保存图片
-        save_dir = os.path.join(SAVE_PATH, number_upper)
-        async with download_lock:
-            os.makedirs(save_dir, exist_ok=True)
-
-        async with aiohttp.ClientSession() as session:
-            tasks = [
-                download_image(session, att, number_upper, idx)
-                for idx, att in enumerate(found_image_msg.attachments)
-            ]
-            files = await asyncio.gather(*tasks)
-            files = [f for f in files if f is not None]
-
-        # 时间戳
+        number = self.number.value.strip().upper()
+        label = self.bach_code.value.strip().upper()
+        url_val = self.optional.value.strip() or "(NA)"
+        note_raw = self.note.value.strip()
+        location_val = self.location.value.strip() or "(NA)"
         timestamp = datetime.now().strftime('%Y-%m-%d %H:%M')
 
-        # Embed 卡片
-        embed_description = (
-            f"🏷️ **label**：{bach_code_clean}\n"
-            f"📦 **编号**：{number_upper}\n"
-            f"🔗 **链接**：{url_val}\n"
-            f"📝 **描述**：{product_desc}\n"
-            f"📷 **图片数量**：{len(files)} 张\n"
-            f"🪜 **位置**：{self.location.value or '（未填写）'}\n"
-            f"👤 **上传人**：{interaction.user.mention}\n"
-            f"📅 **时间**：{timestamp}"
-        )
-        embed = discord.Embed(
-            title=number_upper,
-            description=embed_description,
-            color=discord.Color.blue()
-        )
+        # 检查编号是否已存在
+        exists = await collection.find_one({"number": number})
+        if exists:
+            await interaction.followup.send(f"⚠️ number `{number}` exists.", ephemeral=True)
+            return
 
-        reply = await interaction.followup.send(embed=embed, files=files)
-        jump_url = f"https://discord.com/channels/{SERVER_ID}/{reply.channel.id}/{reply.id}"
+        # 查询 label → bach_code 映射
+        label_doc = await label_map.find_one({"label": label})
+        if not label_doc:
+            await interaction.followup.send(f"❌ Label `{label}` not found. Please contact the admin", ephemeral=True)
+            return
 
-        # 写入 MongoDB
+        bach_code = label_doc["bach_code"]
+        current_session = get_current_session_name()
+
+
+        # Parse SKU from note (first line like "SKU: 123")
+        lines = note_raw.splitlines()
+        sku_val = ""
+        if lines and lines[0].strip().lower().startswith("sku"):
+            sku_val = lines[0].split(":", 1)[-1].strip()
+            lines = lines[1:]  # Remove SKU line
+        
+        product_note = "\n".join(lines).strip()
+        # 插入记录到 MongoDB
         doc = {
-            "label": bach_code_clean,
-            "number": number_upper,
+            "session": current_session,
+            "label": label,
+            "number": number,
             "url": url_val,
-            "description": product_desc,
-            "location": self.location.value,
-            "image_count": len(files),
+            "sku": sku_val,
+            "note": product_note,
+            "location": location_val,
             "user": interaction.user.display_name,
             "timestamp": timestamp,
-            "jump_url": jump_url,
-            "Bach Code": bach_id,
-            "record_status": False
+            "Bach Code": bach_code,
         }
         await collection.insert_one(doc)
-        logging.info(f"✅ 上传记录已保存到数据库：{doc}")
 
-        try:
-            await found_image_msg.delete()
-        except Exception as e:
-            logging.warning(f"❌ 删除图片消息失败：{e}")
+        # ✅ 使用独立日志器记录
+        discord_logger.info(
+            f"[SUBMIT] {interaction.user.display_name} 提交表单 | 场次：{current_session} | 编号：{number} | label：{label} | Note：{product_note[:30]}..."
+        )
 
-# === Slash 指令绑定 ===
-@tree.command(name="qa", description="打开质检上传表单")
-async def open_form(interaction: discord.Interaction):
+        # 生成上传链接
+        token = generate_token(number, interaction.user.display_name)
+        upload_link = f"{UPLOAD_URL}?number={number}&user={interaction.user.display_name}&token={token}"
+
+        await interaction.followup.send(content="✅ Form submitted successfully. Information has been sent to the channel.", ephemeral=True)
+
+        msg_text = (
+            f"🏷️ **label**: {label}\n"
+            f"📦 **Item number**: {number}\n"
+            f"🔗 **Link**: {url_val}\n"
+            f"🆔 **SKU**: {sku_val or '(NA)'}\n"
+            f"📝 **Note**: {product_note}\n"
+            f"🪜 **location**: {location_val}\n"
+            f"👤 **Inspector**: {interaction.user.mention}\n"
+            f"📅 **Time**: {timestamp}\n"
+            # f"📸 上传链接：{upload_link}"
+        )
+        await interaction.channel.send(content=msg_text)
+        await interaction.followup.send(
+            content=f"📸 Upload link: {upload_link}",
+            ephemeral=True
+        )
+
+# === 注册命令 ===
+@tree.command(name="f", description="Open QA form (Please upload images via webpage)")
+async def qa(interaction: discord.Interaction):
     await interaction.response.send_modal(QAForm())
 
+# === 启动事件 ===
 @bot.event
 async def on_ready():
-    try:
-        await tree.sync()
-        print(f"✅ Bot 已上线：{bot.user}")
-    except discord.errors.Forbidden:
-        print("❌ 缺少权限，无法同步 Slash 指令。请检查 OAuth 权限设置。")
-
+    await tree.sync()
+    print(f"✅ Bot 已上线：{bot.user}")
+    print(f"current session: {get_current_session_name()}")
 bot.run(TOKEN)

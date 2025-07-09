@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <title>log</title>
+  <style>
+    body { font-family: monospace; background: #111; color: #0f0; padding: 20px; }
+    select , button{ font-size: 16px; margin-bottom: 10px; }
+    pre {
+      white-space: pre-wrap;
+      background: #000;
+      border: 1px solid #444;
+      padding: 10px;
+      height: 600px;
+      overflow-y: scroll;
+    }
+  </style>
+</head>
+<body>
+  <h2>📝 实时日志查看</h2>
+  <label>选择日志：</label>
+  <select id="logType" onchange="loadLog()">
+    <option value="flask">Flask 日志</option>
+    <option value="discord">Discord Bot 日志</option>
+    <option value="upload">图片上传日志</option>
+  </select>
+  <button onclick="loadLog()">🔄 刷新</button>
+  <pre id="logBox">加载中...</pre>
+
+  <script>
+    function loadLog() {
+      const type = document.getElementById("logType").value;
+      fetch(`/get-log?file=${type}`)
+        .then(res => res.text())
+        .then(data => {
+          document.getElementById("logBox").innerText = data;
+        });
+    }
+
+    loadLog();
+    setInterval(loadLog, 20000);
+  </script>
+</body>
+</html>
